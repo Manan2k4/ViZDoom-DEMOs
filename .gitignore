@@ -1,0 +1,15 @@
+# Ignore replay buffer and checkpoints
+models/replay_buffer.pkl
+models/*.pth
+
+# Ignore Jupyter notebooks if not needed
+*.ipynb
+
+# Ignore temporary files
+__pycache__/
+*.pyc
+*.pyo
+*.log
+
+# VS Code settings (optional)
+.vscode/
