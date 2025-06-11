@@ -17,7 +17,7 @@ An advanced DQN agent trained on `defend_the_center` scenario. Uses CNNs to anal
 ```bash
 ViZDoom-DEMOs/
 │
-├── models/
+├── src/
 │   ├── doomguy_dqn.py              # Basic strafe-shoot model
 │   ├── doomguy_360_trainer.py      # Full 360° training script
 │   ├── doomguy_dqn_checkpoint.pth  # Saved weights
@@ -28,6 +28,7 @@ ViZDoom-DEMOs/
 │   ├── basic.wad
 │   ├── defend_the_center.cfg
 │   ├── defend_the_center.wad
+│   ├── freedoom2.wad
 │
 ├── doomguy_360_scores.csv          # Logs of episode scores
 ├── analysis.py                     # Optional visualization tools
