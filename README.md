@@ -51,8 +51,6 @@ cd ViZDoom-DEMOs
 pip install -r requirements.txt
 ```
 
----
-
 ### 2. Run a Model:
 ```bash
 python models/doomguy_360_trainer.py
