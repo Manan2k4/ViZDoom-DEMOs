@@ -1,7 +1,7 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 
-df = pd.read_csv("doomguy_360_scores.csv", names=["Episode", "Reward", "Epsilon"])
+df = pd.read_csv("deadly_corridor_data.csv", names=["Episode", "Reward", "Epsilon"])
 
 plt.figure(figsize=(12, 5))
 plt.subplot(1, 2, 1)
