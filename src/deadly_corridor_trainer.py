@@ -1,3 +1,7 @@
+
+# strict_slayer_trainer.py
+# Full final version - same as previous fix with correct input_shape
+
 import os
 import random
 import numpy as np
@@ -10,24 +14,22 @@ import vizdoom as vzd
 from torchvision import transforms
 import csv
 
-# === Paths ===
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCENARIO_PATH = os.path.join(BASE_DIR, "scenarios", "strict_deadly_corridor.cfg")
 WAD_PATH = os.path.join(BASE_DIR, "scenarios", "deadly_corridor.wad")
-LOG_PATH = os.path.join(BASE_DIR, "logs", "strict_deadly_corridor_data.csv")
+LOG_PATH = os.path.join(BASE_DIR, "logs", "strict_deadly_corridor.csv")
 MODEL_SAVE_PATH = os.path.join(BASE_DIR, "models", "strict_doomguy_dqn.pth")
 CHECKPOINT_PATH = os.path.join(BASE_DIR, "models", "strict_checkpoint.pth")
 
 os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
 os.makedirs(os.path.dirname(MODEL_SAVE_PATH), exist_ok=True)
 
-# === Hyperparameters ===
 IMG_SIZE = (84, 84)
 LEARNING_RATE = 1e-4
 DISCOUNT = 0.99
 REPLAY_MEMORY_SIZE = 100_000
 MIN_REPLAY_MEMORY_SIZE = 5_000
-MINIBATCH_SIZE = 64
+MINIBATCH_SIZE = 32
 EPSILON_DECAY = 0.9997
 MIN_EPSILON = 0.1
 MAX_EPSILON = 1.0
@@ -44,15 +46,8 @@ transform = transforms.Compose([
 def preprocess(frame):
     if frame is None:
         raise ValueError("Frame is None — check screen buffer.")
-    if len(frame.shape) == 2:
-        frame = np.expand_dims(frame, axis=0)
-    elif len(frame.shape) == 3:
-        if frame.shape[0] <= 4:
-            pass
-        else:
-            frame = np.transpose(frame, (2, 0, 1))
-    tensor = torch.tensor(frame, dtype=torch.float32).unsqueeze(0)
-    return tensor.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+    img = transform(frame)
+    return img
 
 class DQN(nn.Module):
     def __init__(self, input_shape, n_actions):
@@ -111,7 +106,7 @@ def train():
     while state is None or state.screen_buffer is None:
         game.make_action([0])
         state = game.get_state()
-    input_shape = preprocess(state.screen_buffer).shape[1:]
+    input_shape = preprocess(state.screen_buffer).shape
 
     model = DQN(input_shape, n_actions).to(device)
     target_model = DQN(input_shape, n_actions).to(device)
@@ -119,17 +114,14 @@ def train():
     loss_fn = nn.MSELoss()
     replay_buffer = ReplayBuffer(REPLAY_MEMORY_SIZE)
 
-    # === AUTO-RESUME ===
     start_episode = 0
     epsilon = MAX_EPSILON
     if os.path.exists(CHECKPOINT_PATH):
-        print(f"Loading checkpoint from {CHECKPOINT_PATH} ...")
         checkpoint = torch.load(CHECKPOINT_PATH, map_location=device)
         model.load_state_dict(checkpoint["model_state"])
         target_model.load_state_dict(checkpoint["model_state"])
         epsilon = checkpoint.get("epsilon", MAX_EPSILON)
         start_episode = checkpoint.get("episode", 0)
-        print(f"Resumed from episode {start_episode} with epsilon {epsilon:.3f}")
 
     target_model.eval()
 
@@ -150,16 +142,18 @@ def train():
         last_health = state.game_variables[0]
         last_position = state.game_variables[1]
 
-        frame = preprocess(state.screen_buffer)
+        frame = preprocess(state.screen_buffer).numpy()
 
         while not game.is_episode_finished():
             step_counter += 1
+
+            frame_tensor = torch.tensor(frame, dtype=torch.float32, device=device).unsqueeze(0)
 
             if np.random.rand() < epsilon:
                 action = random.randint(0, len(action_space) - 1)
             else:
                 with torch.no_grad():
-                    q_values = model(frame)
+                    q_values = model(frame_tensor)
                     action = torch.argmax(q_values).item()
 
             total_step_reward = 0
@@ -189,7 +183,7 @@ def train():
             total_reward += shaped_reward
 
             next_state = game.get_state().screen_buffer if not game.is_episode_finished() else None
-            next_frame = preprocess(next_state) if next_state is not None else None
+            next_frame = preprocess(next_state).numpy() if next_state is not None else None
 
             replay_buffer.add((frame, action, shaped_reward, next_frame, game.is_episode_finished()))
             frame = next_frame
@@ -198,8 +192,8 @@ def train():
                 batch = replay_buffer.sample(MINIBATCH_SIZE)
                 states, actions, rewards, next_states, dones = zip(*batch)
 
-                states = torch.cat(states).to(torch.float32)
-                next_states = torch.cat([s for s in next_states if s is not None]).to(torch.float32) if next_states[0] is not None else None
+                states = torch.tensor(np.stack(states), dtype=torch.float32, device=device)
+                next_states = torch.tensor(np.stack([s for s in next_states if s is not None]), dtype=torch.float32, device=device) if next_states[0] is not None else None
                 actions = torch.tensor(actions, device=device, dtype=torch.long)
                 rewards = torch.tensor(rewards, device=device, dtype=torch.float32)
                 dones = torch.tensor(dones, device=device, dtype=torch.bool)
@@ -222,6 +216,9 @@ def train():
 
                 if step_counter % TARGET_UPDATE_FREQ == 0:
                     target_model.load_state_dict(model.state_dict())
+
+                if step_counter % 100 == 0:
+                    torch.cuda.empty_cache()
 
         print(f"Episode {episode+1}/{EPISODES} | Reward: {total_reward:.2f} | Epsilon: {epsilon:.3f}")
 
