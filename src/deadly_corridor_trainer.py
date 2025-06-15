@@ -1,7 +1,3 @@
-
-# strict_slayer_trainer.py
-# Full final version - same as previous fix with correct input_shape
-
 import os
 import random
 import numpy as np
@@ -14,6 +10,7 @@ import vizdoom as vzd
 from torchvision import transforms
 import csv
 
+# === Paths ===
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCENARIO_PATH = os.path.join(BASE_DIR, "scenarios", "strict_deadly_corridor.cfg")
 WAD_PATH = os.path.join(BASE_DIR, "scenarios", "deadly_corridor.wad")
@@ -24,6 +21,7 @@ CHECKPOINT_PATH = os.path.join(BASE_DIR, "models", "strict_checkpoint.pth")
 os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
 os.makedirs(os.path.dirname(MODEL_SAVE_PATH), exist_ok=True)
 
+# === Hyperparameters ===
 IMG_SIZE = (84, 84)
 LEARNING_RATE = 1e-4
 DISCOUNT = 0.99
@@ -36,6 +34,7 @@ MAX_EPSILON = 1.0
 EPISODES = 6000
 TARGET_UPDATE_FREQ = 1000
 
+# === Image Transform ===
 transform = transforms.Compose([
     transforms.ToPILImage(),
     transforms.Resize(IMG_SIZE),
@@ -47,8 +46,9 @@ def preprocess(frame):
     if frame is None:
         raise ValueError("Frame is None — check screen buffer.")
     img = transform(frame)
-    return img
+    return img  # torch tensor, shape: (1, 84, 84)
 
+# === DQN Model ===
 class DQN(nn.Module):
     def __init__(self, input_shape, n_actions):
         super(DQN, self).__init__()
@@ -75,6 +75,7 @@ class DQN(nn.Module):
         x = x.view(x.size(0), -1)
         return self.fc(x)
 
+# === ViZDoom Setup ===
 def init_game():
     game = DoomGame()
     game.set_screen_resolution(vzd.ScreenResolution.RES_640X480)
@@ -86,6 +87,7 @@ def init_game():
     game.init()
     return game
 
+# === Replay Buffer ===
 class ReplayBuffer:
     def __init__(self, size):
         self.buffer = deque(maxlen=size)
@@ -96,17 +98,19 @@ class ReplayBuffer:
     def __len__(self):
         return len(self.buffer)
 
+# === Training Loop ===
 def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     game = init_game()
     n_actions = game.get_available_buttons_size()
     action_space = [list(a) for a in np.eye(n_actions, dtype=np.uint8)]
 
+    # Get input shape correctly
     state = game.get_state()
     while state is None or state.screen_buffer is None:
         game.make_action([0])
         state = game.get_state()
-    input_shape = preprocess(state.screen_buffer).shape
+    input_shape = preprocess(state.screen_buffer).shape  # (1, 84, 84)
 
     model = DQN(input_shape, n_actions).to(device)
     target_model = DQN(input_shape, n_actions).to(device)
@@ -114,6 +118,7 @@ def train():
     loss_fn = nn.MSELoss()
     replay_buffer = ReplayBuffer(REPLAY_MEMORY_SIZE)
 
+    # === Resume if checkpoint exists ===
     start_episode = 0
     epsilon = MAX_EPSILON
     if os.path.exists(CHECKPOINT_PATH):
@@ -122,6 +127,7 @@ def train():
         target_model.load_state_dict(checkpoint["model_state"])
         epsilon = checkpoint.get("epsilon", MAX_EPSILON)
         start_episode = checkpoint.get("episode", 0)
+        print(f"Resumed from episode {start_episode} with epsilon {epsilon:.3f}")
 
     target_model.eval()
 
@@ -141,7 +147,6 @@ def train():
         total_reward = 0
         last_health = state.game_variables[0]
         last_position = state.game_variables[1]
-
         frame = preprocess(state.screen_buffer).numpy()
 
         while not game.is_episode_finished():
@@ -157,25 +162,26 @@ def train():
                     action = torch.argmax(q_values).item()
 
             total_step_reward = 0
-            for _ in range(4):
+            for _ in range(4):  # frame skip
                 r = game.make_action(action_space[action])
                 total_step_reward += r
                 if game.is_episode_finished():
                     break
 
             current_vars = game.get_state().game_variables if not game.is_episode_finished() else [0, 0]
+
+            # === FINAL STRICT-SHAPING ===
+            raw_reward = total_step_reward  # do not multiply!
             health_diff = current_vars[0] - last_health
             damage_taken = -health_diff if health_diff < 0 else 0
             damage_penalty = damage_taken * 2.0
             last_health = current_vars[0]
 
-            position = current_vars[1]
-            progress = position - last_position
-            last_position = position
-
-            kill_reward = total_step_reward * 10
+            progress = current_vars[1] - last_position
             progress_reward = progress * 0.1
-            shaped_reward = kill_reward - damage_penalty + progress_reward
+            last_position = current_vars[1]
+
+            shaped_reward = raw_reward + progress_reward - damage_penalty
 
             if game.is_episode_finished() and current_vars[0] <= 0:
                 shaped_reward -= 100
