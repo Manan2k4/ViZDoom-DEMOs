@@ -1,4 +1,4 @@
-# 🧠 ViZDoom-DEMOs
+# 🧠 ViZDoom-DEMOs 🎮
 
 This repository contains experimental agents trained to play classic Doom using [ViZDoom](https://github.com/mwydmuch/ViZDoom) and Deep Reinforcement Learning (DRL) techniques. Each model explores a different skill set — from basic strafing to full 360° enemy detection and elimination.
 
